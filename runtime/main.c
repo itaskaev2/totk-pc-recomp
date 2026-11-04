@@ -30,6 +30,7 @@
 #include "host.h"
 #include "platform/platform.h"
 #include "sha256.h"
+#include "stats.h"
 
 #define MAX_MODULES 16
 
@@ -553,6 +554,7 @@ int main(int argc, char **argv) {
     if (!mode) {
         cfg.boot = cfg.seconds > 0;   // --seconds starts the game like --boot, with its checkpoints
         discord_init();   // the Rich Presence thread (discord_rpc.c); it reads totk.ini itself and idles while off
+        stats_init();     // the Achievements tab's statistics, read from the save (stats.c)
         rt_boot();
         return 0;
     }
