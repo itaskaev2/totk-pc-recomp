@@ -153,6 +153,9 @@ typedef enum {
     UI_ACH_UNLOCKED_AT,
     UI_ACH_LOCKED,
     UI_ACH_KEEPS,
+    UI_MENU_PLAY_TIME, UI_MENU_PLAY_TIME_DESC,
+    UI_MENU_PLAY_TIME_HM,        // hours and minutes: "%llu h %02u min" (unsigned long long hours, unsigned minutes)
+    UI_MENU_PLAY_TIME_SESSION,   // note under the total: "this run: %s" (the hours and minutes above)
 
     // Mods: the port's own patches and the player's mods folder (mods.c)
     UI_MENU_MODS_BUILTIN, UI_MENU_MODS_INSTALLED,

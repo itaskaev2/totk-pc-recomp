@@ -274,6 +274,10 @@ static const char *const text_en[UI_TEXT_COUNT] = {
     [UI_ACH_D_KM] = "Kilometres on your Hero's Path, on every layer together.",
     [UI_ACH_D_KM_SKY] = "Kilometres on your Hero's Path among the sky islands.",
     [UI_ACH_D_KM_DEPTHS] = "Kilometres on your Hero's Path in the Depths.",
+    [UI_MENU_PLAY_TIME] = "Play time",
+    [UI_MENU_PLAY_TIME_DESC] = "Time in the game over all runs, counted while the game window has the focus and the game "
+                               "draws frames. Kept in playtime.txt in the profile folder, next to the saves.",
+    [UI_MENU_PLAY_TIME_HM] = "%llu h %02u min", [UI_MENU_PLAY_TIME_SESSION] = "this run: %s",
     [UI_MENU_MODS_BUILTIN] = "Built into the port", [UI_MENU_MODS_INSTALLED] = "Installed mods",
     [UI_MENU_MODS_NONE] = "No mods yet. Unpack a mod into the mods folder, one folder per mod with its romfs folder "
                           "inside, and restart the game. TKMM can export its merged mods into a folder there too.",
@@ -826,6 +830,10 @@ static const char *const text_ru[UI_TEXT_COUNT] = {
     [UI_ACH_D_KM] = "Километры на вашем «Пути героя», на всех уровнях вместе.",
     [UI_ACH_D_KM_SKY] = "Километры на вашем «Пути героя» среди небесных островов.",
     [UI_ACH_D_KM_DEPTHS] = "Километры на вашем «Пути героя» в Бездне (Глубинах).",
+    [UI_MENU_PLAY_TIME] = "Время в игре",
+    [UI_MENU_PLAY_TIME_DESC] = "Время в игре за все запуски. Считается, пока окно игры в фокусе и игра рисует кадры. "
+                               "Хранится в playtime.txt в папке профиля, рядом с сохранениями.",
+    [UI_MENU_PLAY_TIME_HM] = "%llu ч %02u мин", [UI_MENU_PLAY_TIME_SESSION] = "в этом запуске: %s",
     [UI_MENU_MODS_BUILTIN] = "Встроенные в порт", [UI_MENU_MODS_INSTALLED] = "Установленные моды",
     [UI_MENU_MODS_NONE] = "Модов пока нет. Распакуйте мод в папку mods, каждый мод в свою папку с папкой romfs внутри, и "
                           "перезапустите игру. TKMM тоже может выгрузить туда объединённые моды отдельной папкой.",
@@ -1229,6 +1237,10 @@ static const char *const text_pt_br[UI_TEXT_COUNT] = {
     [UI_ACH_D_KM] = "Quilômetros no seu Caminho do Herói, em todas as camadas juntas.",
     [UI_ACH_D_KM_SKY] = "Quilômetros no seu Caminho do Herói entre as ilhas do céu.",
     [UI_ACH_D_KM_DEPTHS] = "Quilômetros no seu Caminho do Herói nas Profundezas.",
+    [UI_MENU_PLAY_TIME] = "Tempo de jogo",
+    [UI_MENU_PLAY_TIME_DESC] = "Tempo no jogo somando todas as sessões, contado enquanto a janela do jogo está em foco e o "
+                               "jogo desenha quadros. Fica em playtime.txt na pasta do perfil, junto dos saves.",
+    [UI_MENU_PLAY_TIME_HM] = "%llu h %02u min", [UI_MENU_PLAY_TIME_SESSION] = "nesta sessão: %s",
     [UI_MENU_MODS_BUILTIN] = "Embutidos no port", [UI_MENU_MODS_INSTALLED] = "Mods instalados",
     [UI_MENU_MODS_NONE] = "Nenhum mod ainda. Descompacte um mod na pasta mods, uma pasta por mod com a pasta romfs dentro, "
                           "e reinicie o jogo. O TKMM também pode exportar os mods mesclados para uma pasta ali.",
@@ -1820,6 +1832,10 @@ static const char *const text_zh_hans[UI_TEXT_COUNT] = {
     [UI_ACH_D_KM] = "勇者足迹上的公里数，所有层合计。",
     [UI_ACH_D_KM_SKY] = "勇者足迹上在天空岛之间的公里数。",
     [UI_ACH_D_KM_DEPTHS] = "勇者足迹上在地底的公里数。",
+    [UI_MENU_PLAY_TIME] = "游戏时间",
+    [UI_MENU_PLAY_TIME_DESC] = "所有运行累计的游戏时间，仅在游戏窗口处于焦点且游戏正在绘制画面时计时。"
+                               "保存在配置文件夹的 playtime.txt 中，与存档放在一起。",
+    [UI_MENU_PLAY_TIME_HM] = "%llu 小时 %02u 分钟", [UI_MENU_PLAY_TIME_SESSION] = "本次运行：%s",
     [UI_MENU_MODS_BUILTIN] = "移植版内置", [UI_MENU_MODS_INSTALLED] = "已安装的模组",
     [UI_MENU_MODS_NONE] = "还没有模组。把模组解压到 mods 文件夹，每个模组一个文件夹，里面放 romfs 文件夹，然后重启游戏。"
                           "TKMM 也可以把合并后的模组导出到那里的一个文件夹。",

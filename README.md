@@ -27,6 +27,7 @@ Report problems as issues, following [CONTRIBUTING.md](CONTRIBUTING.md).
 - Anisotropic texture filtering up to 16x, for sharp ground into the distance
 - In-game settings menu (F1) and performance overlay (F10)
 - Achievements and play statistics in the settings menu, with goals you can edit ([below](#achievements-and-statistics))
+- Play time across runs on the Game tab of the settings menu, kept in `playtime.txt` next to the saves
 - Discord Rich Presence ("Playing TotK Recomp" with the play time), off by default, own application id supported
 - Setup and in-game menu in English, Russian, Brazilian Portuguese and Simplified Chinese
 - Keyboard, mouse and gamepad with remapping, rumble and gyro
