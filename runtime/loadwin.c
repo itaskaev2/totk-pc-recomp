@@ -13,6 +13,14 @@
 
 volatile int lw_taking_log;
 
+// The panel has a window system on Windows only (loadwin_win.c). Elsewhere lw_start returns before it buffers or logs
+// anything, so a start there is the same as without this file.
+#ifdef _WIN32
+#define LW_HAS_PANEL 1
+#else
+#define LW_HAS_PANEL 0
+#endif
+
 #define RATE_SAMPLES 48
 #define LOG_TEXT_CAP (16u << 20)   // text waiting for the Details view; a trace-heavy start drops the rest
 
@@ -89,7 +97,7 @@ static void text_add(const char *p, size_t n) {
 
 void lw_start(const char *early, size_t early_n) {
     const char *gpu = rt_config()->gpu;
-    if (cfg_bool("TOTK_CONSOLE") || (gpu && !strcmp(gpu, "null"))) return;
+    if (!LW_HAS_PANEL || cfg_bool("TOTK_CONSOLE") || (gpu && !strcmp(gpu, "null"))) return;
     L.player = rt_config()->seconds <= 0;
     expect_read();
     plat_mutex_lock(&L.lock);
