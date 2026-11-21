@@ -61,6 +61,13 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
   drawn into the swapchain image (`runtime/ui/`); their text is in `ui_text.c` (English, Russian, Brazilian Portuguese,
   Simplified Chinese). The Chinese glyphs come from a system font (Microsoft YaHei, `plat_font_path`) merged into the
   font atlas.
+- Loading window (`loadwin.c`, `loadwin_win.c`). A game run shows a panel in the middle of the screen from the start
+  until the game window opens: the stage, a bar with the counted work of the boot prewarm (shaders, pipelines) and of
+  the mods' files' size-table pass, the time left, and about how long until the game starts, from the length of the
+  last start (`<profile>/loading-time.txt`). Its Details button shows the run's log live. A run that Windows gave a
+  console of its own (started from Explorer or a shortcut) leaves it, so the console window closes; `console = 1`
+  keeps the console and opens no panel. A fatal error or a crash before the game window keeps the panel open with the
+  log until the player closes it.
 - OS calls the host makes go through `runtime/platform/` (`platform.h`, `win32.c`), so a Linux or macOS host adds one file instead of touching the rest. The split is not finished: `tools/check_platform.py` lists the Win32 uses left in the other files.
 
 #### Threads and cores

@@ -104,6 +104,10 @@
 # pipe_prebuild = 1
 # Threads that translate known shaders at start (1 to 64; default: half the CPU threads, at most 16).
 # prewarm_xlate = 8
+# 1: the game starts after every known pipeline is built. 0: it starts once the shaders are loaded and the pipelines
+# queued; the rest are built beside the game's own loading, and a draw that needs one still queued builds it first.
+# Read at start. Default: 1.
+# prewarm_wait = 1
 # Vulkan graphics pipeline library, 0 or 1. Default: on.
 # gpl = 1
 
@@ -600,6 +604,10 @@
 # cheat_0123abcd = 1
 
 [diagnostics]
+# The console window with the log, as before the loading window. 0: a game run shows the loading window (a panel with
+# the start-up stage, its progress and the time left; Details shows the log) and closes the console Windows opened for
+# it. 1: the console stays and no loading window opens. Read at start. Default: 0.
+# console = 0
 # Extra lines in the log, comma separated: svc, host, ipc, fs, gfx, perf, sched, audio, present or all. The menu's
 # Performance log sets perf (frame timings). Default: none.
 # trace = perf

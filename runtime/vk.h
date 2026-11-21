@@ -669,6 +669,9 @@ int vk_pipeline_async_on(void);   // 1 after vk_pipeline_async_enable: graphics 
 // cached under the current translator from their stored inputs, and builds every recorded pipeline, on all cores.
 // No-op without vk_pipeline_async_enable, with TOTK_PIPE_PREBUILD=0 or with TOTK_GPU=null.
 void vk_pipeline_prewarm(void);
+// Returns once vk_pipeline_prewarm has loaded the shaders and queued the pipeline builds, or has returned: with
+// TOTK_PREWARM_WAIT=0 the guest starts from there and the queued builds go on beside it (boot.c rt_boot).
+void vk_pipeline_prewarm_queued_wait(void);
 VkPipeline vk_pipeline_compute(const GfxShader *cs, const VkPipeInfo **info);
 // Records every dynamic state that VkPipeState determines, after binding a graphics pipeline: cull mode, front face,
 // topology, depth and stencil tests and ops, depth bias enable, rasterizer discard, vertex input, and, where the GPU
