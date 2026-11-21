@@ -62,9 +62,11 @@ MacNativeGames cannot run on x86-64 as is: its CPU path executes ARM64 code nati
   Simplified Chinese). The Chinese glyphs come from a system font (Microsoft YaHei, `plat_font_path`) merged into the
   font atlas.
 - Loading window (`loadwin.c`, `loadwin_win.c`). A game run shows a panel in the middle of the screen from the start
-  until the game window opens: the stage, a bar with the counted work of the boot prewarm (shaders, pipelines) and of
-  the mods' files' size-table pass, the time left, and about how long until the game starts, from the length of the
-  last start (`<profile>/loading-time.txt`). Its Details button shows the run's log live. A run that Windows gave a
+  until the game window opens: a wheel after the game's stamina wheel (three rings filling in turn with the share of
+  the whole start, pulsing orange and red; a white flash and green when the game window opens), the stage, the counted
+  work of the boot prewarm (shaders, pipelines) and of the mods' files' size-table pass, the time left, and about how
+  long until the game starts, from the length of the last start (`<profile>/loading-time.txt`; without it, fixed
+  shares of the stages fill the wheel). Its Details button shows the run's log live. A run that Windows gave a
   console of its own (started from Explorer or a shortcut) leaves it, so the console window closes; `console = 1`
   keeps the console and opens no panel. A fatal error or a crash before the game window keeps the panel open with the
   log until the player closes it.

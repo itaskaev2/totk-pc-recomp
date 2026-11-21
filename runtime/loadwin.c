@@ -3,6 +3,7 @@
 // opens and every call returns at once.
 #include "loadwin.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,7 @@ static struct {
     int text_cut;
     double expect_s;                // the last start's length to the game window, 0 when unknown
     double shown_s;                 // this start's, set when the game window opened
+    double overall;                 // the last share of the start shown (lw_view)
     char time_path[PLAT_PATH_MAX * 3];
 } L = {.lock = PLAT_MUTEX_INIT};
 
@@ -204,7 +206,7 @@ static void stage_sample(Stage *t, double now) {
 
 void lw_view(LwView *v) {
     double now = now_s();
-    *v = (LwView){.stage = -1, .frac = -1, .task_left_s = -1, .other = -1, .game_left_s = -1, .elapsed_s = now};
+    *v = (LwView){.stage = -1, .task_left_s = -1, .other = -1, .game_left_s = -1, .elapsed_s = now};
     plat_mutex_lock(&L.lock);
     v->failed = L.failed;
     memcpy(v->why, L.why, sizeof v->why);
@@ -226,17 +228,33 @@ void lw_view(LwView *v) {
     const Stage *t = &L.st[v->stage];
     if (t->total) {
         v->done = t->done, v->total = t->total, v->task_left_s = t->left;
-        v->frac = (double)t->done / (double)t->total;
     }
     if (v->other >= 0) v->other_done = L.st[v->other].done, v->other_total = L.st[v->other].total;
     if (L.expect_s > 0) {
         v->game_left_s = L.expect_s - now;
         if (v->game_left_s < 0) v->game_left_s = 0;
-        if (!t->total) v->frac = now / L.expect_s < 0.99 ? now / L.expect_s : 0.99;
         // The guest waits for the prewarm: a start slower than the last one shows the prewarm's own time left
         if ((v->stage == LW_SHADERS || v->stage == LW_PIPELINES) && v->task_left_s > v->game_left_s)
             v->game_left_s = v->task_left_s;
     }
+    // The share of the whole start: with the last start's length, the time so far against the time so far plus the
+    // time left. Without it (the first start), fixed shares of the stages: an ended stage its whole share, a counted
+    // one by its count, another one nearing its share over a few seconds. Never back, and below 1 until the game window.
+    static const double share[LW_STAGES] = {0.05, 0.05, 0.15, 0.35, 0.25, 0.15};
+    double p = 0;
+    if (v->game_left_s >= 0) {
+        p = now / (now + v->game_left_s);
+    } else {
+        for (int s = 0; s < LW_STAGES; s++) {
+            const Stage *u = &L.st[s];
+            if (u->state == 2) p += share[s];
+            else if (u->state == 1 && u->total) p += share[s] * (double)u->done / (double)u->total;
+            else if (u->state == 1) p += share[s] * (1 - exp(-(now - u->begun) / 4.0));
+        }
+    }
+    if (p > 0.99) p = 0.99;
+    if (p < L.overall) p = L.overall;
+    v->overall = L.overall = p;
     plat_mutex_unlock(&L.lock);
 }
 

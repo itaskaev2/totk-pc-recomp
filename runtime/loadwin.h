@@ -51,7 +51,8 @@ typedef struct {
     int stage;                  // the stage the panel names, -1 before any
     int failed;                 // lw_fatal ran
     char why[512];              // its message
-    double frac;                // 0..1 of the bar; negative: no measure (an animated bar)
+    double overall;             // 0..1, the share of the whole start done (the wheel), below 1 until the game
+                                // window opens; it never goes back
     uint64_t done, total;       // the named stage's counted work (total 0: none)
     double task_left_s;         // its time left, negative when unknown
     int other;                  // another stage running at the same time (-1 none), with its count

@@ -1,11 +1,17 @@
 // The loading window on Win32 (loadwin.h): a borderless panel in the middle of the primary monitor's work area, drawn
-// with GDI on a thread of its own, so it keeps moving while the main and prewarm threads work. It shows the program's
-// icon, its name and version, the stage, a bar with the share done (an animated bar when nothing is counted), the counts
-// and times under it, and a Details button that expands an edit control with the log. The panel can be dragged by any
-// free spot; its close button ends the game, as closing the console did.
+// with GDI on a thread of its own, so it keeps moving while the main and prewarm threads work. It shows a wheel with the
+// share of the start done, the program's name and version, the stage, the counts and times under it, and a Details
+// button that expands an edit control with the log. The panel can be dragged by any free spot; its close button ends the
+// game, as closing the console did.
+//
+// The wheel is drawn after the stamina wheel of the game: three rings, a thick inner one and two thin outer ones, that
+// fill one after the other, each a third of the start, counterclockwise from 12 o'clock. While the start runs the filled
+// part pulses between orange and dark red once a second, as the stamina wheel does when it refills after running out.
+// When the game window opens the rings flash white and turn green, and the panel fades out (finale_step).
 //
 // The process is per-monitor DPI aware (totk.manifest): the layout below is in 96-DPI units scaled by the panel's DPI.
 #include <io.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,19 +23,17 @@
 #include "platform/platform.h"
 #include "ui_text.h"
 
-enum { PANEL_W = 600, PANEL_H = 372, LOG_H = 300, PAD = 28, BTN_W = 150, BTN_H = 32 };
+enum { PANEL_W = 600, PANEL_H = 440, LOG_H = 300, PAD = 28, BTN_W = 150, BTN_H = 32, BTN_Y = 392 };
 enum { ID_DETAILS = 101, ID_COPY, ID_CLOSE, ID_LOG };
 enum { WM_LW_CLOSE = WM_APP + 1, WM_LW_FATAL };
-enum { TIMER_ID = 1, TIMER_MS = 50 };
+enum { TIMER_ID = 1, TIMER_MS = 33 };
 
 #define C_BG RGB(16, 13, 10)
 #define C_EDGE RGB(74, 60, 40)
 #define C_TEXT RGB(243, 234, 216)
 #define C_DIM RGB(168, 159, 142)
 #define C_GOLD RGB(190, 152, 92)
-#define C_BAR_BG RGB(26, 21, 16)
 #define C_BAR_EDGE RGB(92, 74, 51)
-#define C_BAR_FILL RGB(150, 116, 62)
 #define C_LOG_BG RGB(10, 8, 6)
 #define C_LOG_TEXT RGB(214, 206, 190)
 #define C_BTN RGB(36, 29, 22)
@@ -42,10 +46,13 @@ static struct {
     PlatEvent ready, gone;
     int ok, background, expanded, by_player, copied_ticks;
     UINT dpi;
-    unsigned anim;
+    unsigned ticks;
+    double last_s;      // the last tick, seconds
+    double wheel;       // the share the wheel shows, eased toward LwView.overall
+    double pulse;       // the pulse's phase, in periods (seconds)
+    double finale;      // seconds since the game window opened; negative before
     HFONT f_title, f_ver, f_stage, f_body, f_small, f_btn, f_log;
     HBRUSH br_log;
-    HICON icon;
     WNDPROC edit_proc;
     LwView v;
 } G;
@@ -61,10 +68,9 @@ static void fonts_free(void) {
     HFONT *f[] = {&G.f_title, &G.f_ver, &G.f_stage, &G.f_body, &G.f_small, &G.f_btn, &G.f_log};
     for (size_t i = 0; i < sizeof f / sizeof *f; i++)
         if (*f[i]) DeleteObject(*f[i]), *f[i] = NULL;
-    if (G.icon) DestroyIcon(G.icon), G.icon = NULL;
 }
 
-// Fonts and the icon at the panel's DPI. Text with Chinese glyphs falls back from Segoe UI to the system's CJK font
+// Fonts at the panel's DPI. Text with Chinese glyphs falls back from Segoe UI to the system's CJK font
 // through GDI font linking.
 static void fonts_make(void) {
     fonts_free();
@@ -75,8 +81,6 @@ static void fonts_make(void) {
     G.f_small = font(13, FW_NORMAL, L"Segoe UI");
     G.f_btn = font(14, FW_NORMAL, L"Segoe UI");
     G.f_log = font(13, FW_NORMAL, L"Consolas");
-    // Icon resource 1 of totk.rc (runtime/totk.ico), the size the panel draws it at
-    G.icon = LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1), IMAGE_ICON, S(72), S(72), 0);
     if (G.log) SendMessageW(G.log, WM_SETFONT, (WPARAM)G.f_log, TRUE);
 }
 
@@ -141,12 +145,115 @@ static void frame(HDC dc, RECT r, COLORREF c) {
     DeleteObject(b);
 }
 
-static void paint(HDC dc, RECT cr) {
+// ---- the wheel
+typedef struct { double r, g, b; } Rgb;
+// The stamina wheel's colours, measured on a recording of the game; the empty track in the panel's tone
+static const Rgb W_ORANGE = {200, 108, 0}, W_RED = {150, 0, 0}, W_WHITE = {250, 252, 249}, W_GREEN = {0, 240, 88},
+                 W_WAVE = {200, 255, 240}, W_TRACK = {44, 38, 31};
+// Ring radii in 96-DPI units, in the stamina wheel's proportions: the hole 0.40 of the inner ring's outer radius, the
+// middle ring 1.12-1.32 of it, the outer one 1.44-1.56
+static const double RING[3][2] = {{20, 50}, {56, 66}, {72, 78}};
+enum { WHEEL_Y = 108 };
+#define PI 3.14159265358979
+// The finale, in seconds after the game window opened: white, white to green, green, the panel fading out
+#define FIN_WHITE 0.05
+#define FIN_GREEN 0.38
+#define FIN_HOLD 1.00
+#define FIN_END 1.35
+
+typedef struct {
+    double fill[3];          // 0..1 of each ring: inner, middle, outer
+    Rgb color;               // the filled part
+    double glow;             // 0..1: light around the wheel and in its hole
+    double wave_r, wave_a;   // a ring of light moving out: radius (pixels) and strength, 0 for none
+} Wheel;
+
+static double clamp01(double x) { return x < 0 ? 0 : x > 1 ? 1 : x; }
+static Rgb mix(Rgb a, Rgb b, double k) { return (Rgb){a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k}; }
+
+static Wheel wheel_now(const LwView *v) {
+    Wheel w = {0};
+    if (G.finale < 0) {
+        for (int k = 0; k < 3; k++) w.fill[k] = clamp01(3 * G.wheel - k);
+        // Orange at the pulse's whole seconds, dark red half a second later; a failed start stops on dark red
+        w.color = v->failed ? W_RED : mix(W_RED, W_ORANGE, 0.5 + 0.5 * cos(2 * PI * G.pulse));
+        return w;
+    }
+    double f = G.finale;
+    for (int k = 0; k < 3; k++) w.fill[k] = 1;
+    if (f < FIN_WHITE) w.color = W_WHITE, w.glow = 1;
+    else if (f < FIN_GREEN) {
+        double k = clamp01((f - FIN_WHITE) / (FIN_GREEN - FIN_WHITE));
+        k = k * k * (3 - 2 * k);
+        w.color = mix(W_WHITE, W_GREEN, k);
+        w.glow = 1 - 0.85 * k;
+    } else w.color = W_GREEN, w.glow = 0.15;
+    double wave = f / 0.40;
+    if (wave < 1) {
+        w.wave_r = RING[2][1] * G.dpi / 96.0 * (1.0 + 1.5 * (1 - (1 - wave) * (1 - wave)));
+        w.wave_a = 0.6 * (1 - wave) * (1 - wave);
+    }
+    return w;
+}
+
+// Draws the wheel into 32-bit pixels over what they hold: per pixel, the coverage of each ring across its width and
+// along its filled arc, so the edges come out smooth without GDI+.
+static void draw_wheel(uint32_t *px, int pw, int ph, const Wheel *w, double cx, double cy) {
+    double rr[3][2];
+    for (int k = 0; k < 3; k++) rr[k][0] = RING[k][0] * G.dpi / 96.0, rr[k][1] = RING[k][1] * G.dpi / 96.0;
+    double rin = rr[0][0], rout = rr[2][1], glow_w = 11.0 * G.dpi / 96.0, edge = 3.0 * G.dpi / 96.0;
+    double reach = rout + 2 + (w->glow > 0 ? glow_w * 3 : 0);
+    if (w->wave_a > 0 && w->wave_r + 2 * edge > reach) reach = w->wave_r + 2 * edge;
+    int x0 = (int)(cx - reach), x1 = (int)(cx + reach) + 1, y0 = (int)(cy - reach), y1 = (int)(cy + reach) + 1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > pw) x1 = pw;
+    if (y1 > ph) y1 = ph;
+    Rgb gc = mix(W_WHITE, w->color, 0.35);
+    for (int y = y0; y < y1; y++) {
+        for (int x = x0; x < x1; x++) {
+            double dx = x + 0.5 - cx, dy = y + 0.5 - cy, r = sqrt(dx * dx + dy * dy);
+            if (r > reach) continue;
+            uint32_t *p = &px[(size_t)y * pw + x];
+            Rgb c = {(*p >> 16) & 255, (*p >> 8) & 255, *p & 255};
+            if (r >= rin - 1 && r <= rout + 1) {
+                // The angle counterclockwise from 12 o'clock as a share of the turn (y points down)
+                double u = atan2(-dx, -dy) / (2 * PI);
+                if (u < 0) u += 1;
+                double len = 2 * PI * r;
+                for (int k = 0; k < 3; k++) {
+                    double in = r - rr[k][0], out = rr[k][1] - r, cov = clamp01((in < out ? in : out) + 0.5);
+                    if (cov <= 0) continue;
+                    c = mix(c, W_TRACK, cov);
+                    double f = w->fill[k], ca = f >= 1 ? 1 : 0;
+                    if (f > 0 && f < 1) {
+                        double a = u * len, b = (f - u) * len;
+                        ca = clamp01((a < b ? a : b) + 0.5);
+                    }
+                    if (ca > 0) c = mix(c, w->color, cov * ca);
+                }
+            }
+            if (w->glow > 0) {
+                double d = r > rout ? r - rout : r < rin ? rin - r : 0;
+                double g = 0.6 * w->glow * exp(-(d * d) / (glow_w * glow_w)) * (r < rin ? 0.8 : 1.0);
+                c.r += gc.r * g, c.g += gc.g * g, c.b += gc.b * g;
+            }
+            if (w->wave_a > 0) c = mix(c, W_WAVE, w->wave_a * clamp01(1 - fabs(r - w->wave_r) / edge));
+            unsigned R = c.r > 255 ? 255 : (unsigned)c.r, Gn = c.g > 255 ? 255 : (unsigned)c.g,
+                     B = c.b > 255 ? 255 : (unsigned)c.b;
+            *p = R << 16 | Gn << 8 | B;
+        }
+    }
+}
+
+static void paint(HDC dc, RECT cr, uint32_t *px) {
     const LwView *v = &G.v;
     int w = cr.right, cx = w / 2;
     fill(dc, cr, C_BG);
+    GdiFlush();   // the fill is in the pixels before the wheel goes over it
+    Wheel wh = wheel_now(v);
+    draw_wheel(px, cr.right, cr.bottom, &wh, cx, S(WHEEL_Y));
     SetBkMode(dc, TRANSPARENT);
-    if (G.icon) DrawIconEx(dc, cx - S(36), S(22), G.icon, S(72), S(72), 0, NULL, DI_NORMAL);
 
     // The name in spaced capitals, centred by its measured width: DrawText's DT_CENTER leaves the spacing out of the
     // width it centres, and the spacing after the last letter is not part of the word
@@ -158,13 +265,13 @@ static void paint(HDC dc, RECT cr) {
         SetTextColor(dc, C_TEXT);
         SIZE sz;
         GetTextExtentPoint32W(dc, name, n, &sz);
-        TextOutW(dc, cx - (sz.cx - extra) / 2, S(120) - sz.cy / 2, name, n);
+        TextOutW(dc, cx - (sz.cx - extra) / 2, S(222) - sz.cy / 2, name, n);
         SetTextCharacterExtra(dc, 0);
     }
 
     // A rule with a small diamond in its middle
     HPEN pen = CreatePen(PS_SOLID, 1, C_BAR_EDGE), old_pen = SelectObject(dc, pen);
-    int y = S(150);
+    int y = S(252);
     MoveToEx(dc, cx - S(150), y, NULL), LineTo(dc, cx - S(12), y);
     MoveToEx(dc, cx + S(12), y, NULL), LineTo(dc, cx + S(150), y);
     SelectObject(dc, old_pen);
@@ -181,39 +288,21 @@ static void paint(HDC dc, RECT cr) {
     char game[16];
     snprintf(game, sizeof game, "%d.%d.%d", rt_game_version / 100, rt_game_version / 10 % 10, rt_game_version % 10);
     snprintf(line, sizeof line, menu_text(UI_LW_VERSION), rt_port_version, game);
-    draw_u8(dc, line, (RECT){0, S(157), w, S(177)}, DT_CENTER | DT_SINGLELINE | DT_VCENTER, G.f_ver, C_DIM);
+    draw_u8(dc, line, (RECT){0, S(259), w, S(279)}, DT_CENTER | DT_SINGLELINE | DT_VCENTER, G.f_ver, C_DIM);
 
-    draw_u8(dc, v->failed ? menu_text(UI_LW_FAILED) : stage_name(v->stage), (RECT){S(PAD), S(188), w - S(PAD), S(220)},
+    draw_u8(dc, v->failed ? menu_text(UI_LW_FAILED) : stage_name(v->stage), (RECT){S(PAD), S(288), w - S(PAD), S(318)},
             DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS, G.f_stage, v->failed ? C_FAIL : C_TEXT);
 
-    if (v->failed) {   // the reason in place of the bar, what to do under it
-        draw_u8(dc, v->why[0] ? v->why : menu_text(UI_LW_FAILED_HINT), (RECT){S(PAD), S(226), w - S(PAD), S(282)},
+    if (v->failed) {   // the reason under the stage, what to do under it
+        draw_u8(dc, v->why[0] ? v->why : menu_text(UI_LW_FAILED_HINT), (RECT){S(PAD), S(322), w - S(PAD), S(362)},
                 DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS, G.f_body, C_TEXT);
         if (v->why[0])
-            draw_u8(dc, menu_text(UI_LW_FAILED_HINT), (RECT){S(PAD), S(284), w - S(PAD), S(316)}, DT_LEFT | DT_WORDBREAK,
+            draw_u8(dc, menu_text(UI_LW_FAILED_HINT), (RECT){S(PAD), S(364), w - S(PAD), S(390)}, DT_LEFT | DT_WORDBREAK,
                     G.f_small, C_DIM);
     }
-    // The bar: the share done, or a moving block while nothing is counted
-    RECT bar = {S(PAD), S(228), w - S(PAD), S(254)};
-    if (!v->failed) fill(dc, bar, C_BAR_BG);
-    int bw = bar.right - bar.left;
-    if (!v->failed && v->frac >= 0) {
-        RECT f = bar;
-        f.right = bar.left + (int)(bw * (v->frac > 1 ? 1 : v->frac));
-        fill(dc, f, C_BAR_FILL);
-    } else if (!v->failed) {
-        int seg = bw / 4, span = bw + seg, at = (int)((G.anim * 9u) % (unsigned)span) - seg;
-        RECT f = {bar.left + (at < 0 ? 0 : at), bar.top, bar.left + (at + seg > bw ? bw : at + seg), bar.bottom};
-        if (f.right > f.left) fill(dc, f, C_BAR_FILL);
-    }
-    if (!v->failed) frame(dc, bar, C_BAR_EDGE);
-    if (!v->failed && v->frac >= 0) {
-        snprintf(line, sizeof line, "%d%%", (int)(v->frac * 100));
-        draw_u8(dc, line, bar, DT_CENTER | DT_SINGLELINE | DT_VCENTER, G.f_body, C_TEXT);
-    }
 
-    // Under the bar: the counts and the time left, or what to do after a failure
-    RECT r1 = {S(PAD), S(262), w - S(PAD), S(284)}, r2 = {S(PAD), S(285), w - S(PAD), S(305)};
+    // Under the stage: the counts and the time left
+    RECT r1 = {S(PAD), S(326), w - S(PAD), S(348)}, r2 = {S(PAD), S(349), w - S(PAD), S(369)};
     if (!v->failed) {
         if (v->total) {
             count_text(v->done, v->total, a, sizeof a);
@@ -247,7 +336,7 @@ static void paint(HDC dc, RECT cr) {
         snprintf(line + n, sizeof line - n, "  \xc2\xb7  %s", a);
     }
     int right = w - S(PAD) - S(BTN_W) - S(12);
-    draw_u8(dc, line, (RECT){S(PAD), S(320), right, S(320 + BTN_H)}, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+    draw_u8(dc, line, (RECT){S(PAD), S(BTN_Y), right, S(BTN_Y + BTN_H)}, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             G.f_small, C_DIM);
     frame(dc, cr, C_EDGE);
 }
@@ -294,7 +383,7 @@ static void lay_out(void) {
     if (top < mi.rcWork.top) top = mi.rcWork.top;
     SetWindowPos(G.hwnd, NULL, wr.left, top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(G.close, NULL, w - S(40), S(8), S(32), S(32), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(G.details, NULL, w - S(PAD) - S(BTN_W), S(320), S(BTN_W), S(BTN_H), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(G.details, NULL, w - S(PAD) - S(BTN_W), S(BTN_Y), S(BTN_W), S(BTN_H), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(G.copy, NULL, w - S(PAD) - S(BTN_W), S(PANEL_H) + S(LOG_H) + S(12), S(BTN_W), S(BTN_H),
                  SWP_NOZORDER | SWP_NOACTIVATE | (G.expanded ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
     SetWindowPos(G.log, NULL, S(PAD), S(PANEL_H), w - 2 * S(PAD), S(LOG_H), SWP_NOZORDER | SWP_NOACTIVATE |
@@ -393,13 +482,45 @@ static LRESULT CALLBACK log_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 }
 
 // ---- the window
+static double clock_s(void) {
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f), QueryPerformanceCounter(&c);
+    return (double)c.QuadPart / (double)f.QuadPart;
+}
+
+// The finale after the game window opened: the panel stays on top of it while the wheel flashes and turns green, then
+// fades out and closes. Returns 0 once it closed the panel.
+static int finale_step(void) {
+    if (G.finale < FIN_HOLD) return 1;
+    if (G.finale >= FIN_END) {
+        DestroyWindow(G.hwnd);
+        return 0;
+    }
+    SetLayeredWindowAttributes(G.hwnd, 0, (BYTE)(255 * (1 - (G.finale - FIN_HOLD) / (FIN_END - FIN_HOLD))), LWA_ALPHA);
+    return 1;
+}
+
+// Every TIMER_MS the animation moves; every other tick the view and the log are read, as often as before the wheel.
 static void tick(void) {
-    G.anim++;
+    double now = clock_s(), dt = G.last_s > 0 ? now - G.last_s : 0;
+    G.last_s = now;
+    if (dt > 0.25) dt = 0.25;
+    int read = G.ticks++ % 2 == 0;
     if (G.copied_ticks && !--G.copied_ticks) InvalidateRect(G.copy, NULL, FALSE);
-    lw_view(&G.v);
-    size_t n = 0;
-    char *t = lw_log_take(&n);
-    if (t) log_append(t, n), free(t);
+    if (G.finale >= 0) {
+        G.finale += dt;
+        if (!finale_step()) return;
+    } else {
+        if (read) lw_view(&G.v);
+        G.pulse += dt;
+        double k = dt / 0.5 < 1 ? dt / 0.5 : 1;   // the wheel eases toward the share over about half a second
+        if (G.v.overall > G.wheel) G.wheel += (G.v.overall - G.wheel) * k;
+    }
+    if (read) {
+        size_t n = 0;
+        char *t = lw_log_take(&n);
+        if (t) log_append(t, n), free(t);
+    }
     RECT top = {0, 0, S(PANEL_W), S(PANEL_H)};
     InvalidateRect(G.hwnd, &top, FALSE);
 }
@@ -417,13 +538,20 @@ static LRESULT CALLBACK panel_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         HDC dc = BeginPaint(h, &ps);
         RECT cr;
         GetClientRect(h, &cr);
+        // A top-down 32-bit DIB, so the wheel can be drawn into its pixels between the GDI calls
+        BITMAPINFO bi = {.bmiHeader = {.biSize = sizeof bi.bmiHeader, .biWidth = cr.right, .biHeight = -cr.bottom,
+                                       .biPlanes = 1, .biBitCount = 32, .biCompression = BI_RGB}};
+        void *px = NULL;
         HDC mem = CreateCompatibleDC(dc);
-        HBITMAP bmp = CreateCompatibleBitmap(dc, cr.right, cr.bottom), old = SelectObject(mem, bmp);
-        paint(mem, cr);
-        BitBlt(dc, 0, 0, cr.right, cr.bottom, mem, 0, 0, SRCCOPY);
-        SelectObject(mem, old);
-        DeleteObject(bmp);
-        DeleteDC(mem);
+        HBITMAP bmp = mem ? CreateDIBSection(mem, &bi, DIB_RGB_COLORS, &px, NULL, 0) : NULL;
+        if (bmp && px) {
+            HGDIOBJ old = SelectObject(mem, bmp);
+            paint(mem, cr, px);
+            BitBlt(dc, 0, 0, cr.right, cr.bottom, mem, 0, 0, SRCCOPY);
+            SelectObject(mem, old);
+        }
+        if (bmp) DeleteObject(bmp);
+        if (mem) DeleteDC(mem);
         EndPaint(h, &ps);
         return 0;
     }
@@ -454,11 +582,24 @@ static LRESULT CALLBACK panel_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         lay_out();
         return 0;
     }
-    case WM_LW_CLOSE:
+    case WM_LW_CLOSE:   // the game window opened: the finale; at once for a test run or a minimized panel
         G.by_player = 0;
-        DestroyWindow(h);
+        if (G.background || IsIconic(h) || G.finale >= 0) {
+            DestroyWindow(h);
+            return 0;
+        }
+        G.finale = 0;
+        SetWindowLongPtrW(h, GWL_EXSTYLE, GetWindowLongPtrW(h, GWL_EXSTYLE) | WS_EX_LAYERED);
+        SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
+        SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        InvalidateRect(h, NULL, FALSE);
         return 0;
     case WM_LW_FATAL:
+        if (G.finale >= 0) {   // a failure during the finale: the panel stays and shows it
+            G.finale = -1;
+            SetLayeredWindowAttributes(h, 0, 255, LWA_ALPHA);
+            SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
         lw_view(&G.v);
         tick();
         set_expanded(1);
@@ -494,6 +635,7 @@ static void dark_scrollbars(HWND h) {
 static void panel_main(void *arg) {
     (void)arg;
     G.thread_id = GetCurrentThreadId();
+    G.finale = -1;
     HINSTANCE inst = GetModuleHandleW(NULL);
     WNDCLASSEXW wc = {.cbSize = sizeof wc, .lpfnWndProc = panel_proc, .hInstance = inst,
                       .hIcon = LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
