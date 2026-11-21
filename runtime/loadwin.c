@@ -237,20 +237,24 @@ void lw_view(LwView *v) {
         if ((v->stage == LW_SHADERS || v->stage == LW_PIPELINES) && v->task_left_s > v->game_left_s)
             v->game_left_s = v->task_left_s;
     }
-    // The share of the whole start: with the last start's length, the time so far against the time so far plus the
-    // time left. Without it (the first start), fixed shares of the stages: an ended stage its whole share, a counted
-    // one by its count, another one nearing its share over a few seconds. Never back, and below 1 until the game window.
+    // The share of the whole start, the larger of two measures. By time: the time so far against the last start's
+    // length, so the rings fill at an even pace (the prewarm's own time left runs high while its rate settles, and would
+    // hold the wheel back and then let it jump); past 95% it only creeps on toward 99%, for a start slower than the
+    // last. By stages, for a first start and for one faster than the last (warm caches): fixed shares of the stages, an
+    // ended stage its whole share, a counted one by its count, another one nearing its share over a few seconds. Never
+    // back, and below 1 until the game window.
     static const double share[LW_STAGES] = {0.05, 0.05, 0.15, 0.35, 0.25, 0.15};
     double p = 0;
-    if (v->game_left_s >= 0) {
-        p = now / (now + v->game_left_s);
-    } else {
-        for (int s = 0; s < LW_STAGES; s++) {
-            const Stage *u = &L.st[s];
-            if (u->state == 2) p += share[s];
-            else if (u->state == 1 && u->total) p += share[s] * (double)u->done / (double)u->total;
-            else if (u->state == 1) p += share[s] * (1 - exp(-(now - u->begun) / 4.0));
-        }
+    for (int s = 0; s < LW_STAGES; s++) {
+        const Stage *u = &L.st[s];
+        if (u->state == 2) p += share[s];
+        else if (u->state == 1 && u->total) p += share[s] * (double)u->done / (double)u->total;
+        else if (u->state == 1) p += share[s] * (1 - exp(-(now - u->begun) / 4.0));
+    }
+    if (L.expect_s > 0) {
+        double knee = 0.95 * L.expect_s;
+        double by_time = now < knee ? now / L.expect_s : 0.95 + 0.04 * (1 - exp(-(now - knee) / 5.0));
+        if (by_time > p) p = by_time;
     }
     if (p > 0.99) p = 0.99;
     if (p < L.overall) p = L.overall;
